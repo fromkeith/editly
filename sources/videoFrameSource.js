@@ -62,8 +62,7 @@ module.exports = async ({ width: canvasWidth, height: canvasHeight, channels, fr
 
   // TODO assert that we have read the correct amount of frames
 
-  const buf = Buffer.allocUnsafe(frameByteSize);
-  let length = 0;
+  
   // let inFrameCount = 0;
 
   // https://forum.unity.com/threads/settings-for-importing-a-video-with-an-alpha-channel.457657/
@@ -83,9 +82,21 @@ module.exports = async ({ width: canvasWidth, height: canvasHeight, channels, fr
     hwFilter = ['-vf', 'hwdownload,format=nv12' + (ptsFilter ? `,${ptsFilter}` : '')];
   }
 
+  console.log({
+    path,
+    codec: firstVideoStream.codec_name,
+    ptsFilter,
+    framerateStr,
+    scaleFilter,
+    hwFilter,
+  });
+
   // http://zulko.github.io/blog/2013/09/27/read-and-write-video-frames-in-python-using-ffmpeg/
   // Testing: ffmpeg -i 'vid.mov' -t 1 -vcodec rawvideo -pix_fmt rgba -f image2pipe - | ffmpeg -f rawvideo -vcodec rawvideo -pix_fmt rgba -s 2166x1650 -i - -vf format=yuv420p -vcodec libx264 -y out.mp4
   // https://trac.ffmpeg.org/wiki/ChangingFrameRate
+  /*
+  -hwaccel cuvid -vcodec hevc_cuvid -ss 359 -i samples/test-foam.MP4 -t 58 -vf fps=30000/1001,scale=1920:1080 -map v:0 -vcodec rawvideo -pix_fmt rgba -f image2pipe -
+  */
   const args = [
     ...getFfmpegCommonArgs({ enableFfmpegLog }),
     ...(hwAccel),
@@ -115,7 +126,107 @@ module.exports = async ({ width: canvasWidth, height: canvasHeight, channels, fr
     ended = true;
   });
 
+
+  const readBuffers = [];
+  // const writeBuffers = [];
+  let streamPaused = false;
+  let isDone = false;
+
+  function returnReadBuffer(buf) {
+    writeBuffers.push(buf);
+    if (streamPaused) {
+      streamPaused = false;
+      stream.on('data', handleChunk);
+      stream.on('end', onEnd);
+      // stream.on('error', reject);
+      stream.resume();
+    }
+  }
+  let nextFrameReadyDefer = null;
+  function giveReadBuffer(buf) {
+    readBuffers.push(buf);
+    if (nextFrameReadyDefer) {
+      nextFrameReadyDefer();
+      nextFrameReadyDefer = null;
+    }
+  }
+  async function getReadFrame() {
+    if (readBuffers.length > 0) {
+      return readBuffers.shift();
+    }
+    return new Promise((resolve) => {
+      nextFrameReadyDefer = resolve;
+    }).then(() => {
+      return readBuffers.shift();
+    });
+  }
+
+  const writeBuffers = [
+    Buffer.allocUnsafe(frameByteSize),
+    Buffer.allocUnsafe(frameByteSize),
+    Buffer.allocUnsafe(frameByteSize),
+    Buffer.allocUnsafe(frameByteSize),
+    Buffer.allocUnsafe(frameByteSize),
+  ];
+
+  function cleanup() {
+    streamPaused = true;
+    stream.pause();
+    // eslint-disable-next-line no-use-before-define
+    stream.removeListener('data', handleChunk);
+    stream.removeListener('end', onEnd);
+    // stream.removeListener('error', reject);
+  }
+  function onEnd() {
+    isDone = true;
+  }
+  let length = 0;
+
+  let activeBuffer;
+  function handleChunk(chunk) {
+    // console.log('chunk', chunk.length);
+    // console.log('writeBuffers', writeBuffers.length);
+    if (!activeBuffer) {
+      activeBuffer = writeBuffers.pop();
+    }
+    const nCopied = length + chunk.length > frameByteSize ? frameByteSize - length : chunk.length;
+    chunk.copy(activeBuffer, length, 0, nCopied);
+    length += nCopied;
+
+    if (length > frameByteSize) console.error('Video data overflow', length);
+
+    if (length >= frameByteSize) {
+      // console.log('Finished reading frame', inFrameCount, path);
+      // making a copy... why? ah... cause of left over being put at front for next frame
+      // const out = Buffer.from(buf);
+
+      const restLength = chunk.length - nCopied;
+      if (restLength > 0) {
+        // if (verbose) console.log('Left over data', nCopied, chunk.length, restLength);
+        chunk.slice(nCopied).copy(writeBuffers[writeBuffers.length - 1], 0);
+        length = restLength;
+      } else {
+        length = 0;
+      }
+
+      // inFrameCount += 1;
+      // always need 2 buffers avaialble incase of overflow
+      if (writeBuffers.length === 1) {
+        // clearTimeout(timeout);
+        cleanup();
+      }
+      giveReadBuffer(activeBuffer);
+      activeBuffer = null;
+    }
+  }
+  stream.on('data', handleChunk);
+  stream.on('end', onEnd);
+  // stream.on('error', reject);
+  stream.resume();
+
+
   async function readNextFrame(progress, canvas) {
+    // console.log('--' + path);
     const rgba = await new Promise((resolve, reject) => {
       if (ended) {
         console.log(path, 'Tried to read next video frame after ffmpeg video stream ended');
@@ -123,63 +234,30 @@ module.exports = async ({ width: canvasWidth, height: canvasHeight, channels, fr
         return;
       }
       // console.log('Reading new frame', path);
-
-      function onEnd() {
+      if (isDone) {
         resolve();
+        return;
       }
+      getReadFrame().then(resolve, reject);
+      // timeout = setTimeout(() => {
+      //   console.warn('Timeout on read video frame');
+      //   cleanup();
+      //   resolve();
+      // }, 60000);
 
-      function cleanup() {
-        stream.pause();
-        // eslint-disable-next-line no-use-before-define
-        stream.removeListener('data', handleChunk);
-        stream.removeListener('end', onEnd);
-        stream.removeListener('error', reject);
-      }
-
-      function handleChunk(chunk) {
-        // console.log('chunk', chunk.length);
-        const nCopied = length + chunk.length > frameByteSize ? frameByteSize - length : chunk.length;
-        chunk.copy(buf, length, 0, nCopied);
-        length += nCopied;
-
-        if (length > frameByteSize) console.error('Video data overflow', length);
-
-        if (length >= frameByteSize) {
-          // console.log('Finished reading frame', inFrameCount, path);
-          const out = Buffer.from(buf);
-
-          const restLength = chunk.length - nCopied;
-          if (restLength > 0) {
-            // if (verbose) console.log('Left over data', nCopied, chunk.length, restLength);
-            chunk.slice(nCopied).copy(buf, 0);
-            length = restLength;
-          } else {
-            length = 0;
-          }
-
-          // inFrameCount += 1;
-
-          clearTimeout(timeout);
-          cleanup();
-          resolve(out);
-        }
-      }
-
-      timeout = setTimeout(() => {
-        console.warn('Timeout on read video frame');
-        cleanup();
-        resolve();
-      }, 60000);
-
-      stream.on('data', handleChunk);
-      stream.on('end', onEnd);
-      stream.on('error', reject);
-      stream.resume();
     });
 
     if (!rgba) return;
 
     assert(rgba.length === frameByteSize);
+
+    if (resizeMode !== 'contain-blur' && requestedWidth == targetWidth && requestedHeight == targetHeight) {
+      if (logTimes) console.time('copyFrameBufferS')
+      const copy = Buffer.from(rgba);
+      if (logTimes) console.timeEnd('copyFrameBufferS')
+      returnReadBuffer(rgba);
+      return copy;
+    }
 
     if (logTimes) console.time('rgbaToFabricImage');
     const img = await rgbaToFabricImage({ width: targetWidth, height: targetHeight, rgba });
@@ -204,6 +282,7 @@ module.exports = async ({ width: canvasWidth, height: canvasHeight, channels, fr
       top: top + centerOffsetY,
     });
 
+
     if (resizeMode === 'contain-blur') {
       const mutableImg = await new Promise((r) => img.cloneAsImage(r));
       const blurredImg = await blurImage({ mutableImg, width: requestedWidth, height: requestedHeight });
@@ -214,7 +293,15 @@ module.exports = async ({ width: canvasWidth, height: canvasHeight, channels, fr
         originY,
       });
       canvas.add(blurredImg);
+    } else if (left === 0 && top === 0 && centerOffsetX === 0 && centerOffsetY === 0) {
+      if (logTimes) console.time('copyFrameBuffer')
+      const copy = Buffer.from(rgba);
+      if (logTimes) console.timeEnd('copyFrameBuffer')
+      returnReadBuffer(rgba);
+      return copy;
     }
+    returnReadBuffer(rgba);
+
 
     canvas.add(img);
   }

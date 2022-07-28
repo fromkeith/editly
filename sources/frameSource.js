@@ -51,6 +51,14 @@ async function createFrameSource({ clip, clipIndex, width, height, channels, ver
     const canvas = createFabricCanvas({ width, height });
 
     // eslint-disable-next-line no-restricted-syntax
+    let drawLayersCount = 0
+    for (const { frameSource, layer } of layerFrameSources) {
+      const offsetProgress = (time - (layer.start)) / layer.layerDuration;
+      const shouldDrawLayer = offsetProgress >= 0 && offsetProgress <= 1;
+      if (shouldDrawLayer) {
+        drawLayersCount++;
+      }
+    }
     for (const { frameSource, layer } of layerFrameSources) {
       // console.log({ start: layer.start, stop: layer.stop, layerDuration: layer.layerDuration, time });
       const offsetProgress = (time - (layer.start)) / layer.layerDuration;
@@ -66,7 +74,9 @@ async function createFrameSource({ clip, clipIndex, width, height, channels, ver
         // OR return an raw RGBA blob which will be drawn onto the canvas
         if (rgba) {
           // Optimization: Don't need to draw to canvas if there's only one layer
-          if (layerFrameSources.length === 1) return rgba;
+          if (layerFrameSources.length === 1 || drawLayersCount === 1) {
+            return rgba;
+          }
 
           if (logTimes) console.time('rgbaToFabricImage');
           const img = await rgbaToFabricImage({ width, height, rgba });
@@ -77,11 +87,13 @@ async function createFrameSource({ clip, clipIndex, width, height, channels, ver
         }
       }
     }
-    // if (verbose) console.time('Merge frames');
-
-    if (logTimes) console.time('renderFabricCanvas');
+    if (verbose) console.time('Merge frames');
+    // console.log('drawCount', drawLayersCount);
+    // console.log('sources', layerFrameSources.length);
+    // throw new Error('wtf');
+    if (logTimes) console.time('renderFabricCanvasFF');
     const rgba = await renderFabricCanvas(canvas);
-    if (logTimes) console.timeEnd('renderFabricCanvas');
+    if (logTimes) console.timeEnd('renderFabricCanvasFF');
     return rgba;
   }
 
