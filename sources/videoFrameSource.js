@@ -55,7 +55,7 @@ module.exports = async ({ width: canvasWidth, height: canvasHeight, channels, fr
   let ptsFilter = '';
   if (speedFactor !== 1) {
     if (verbose) console.log('speedFactor', speedFactor);
-    ptsFilter = `setpts=${speedFactor}*PTS,`;
+    ptsFilter = `setpts=${speedFactor}*PTS`;
   }
 
   const frameByteSize = targetWidth * targetHeight * channels;
@@ -72,23 +72,32 @@ module.exports = async ({ width: canvasWidth, height: canvasHeight, channels, fr
   // https://superuser.com/a/1116905/658247
 
   let inputCodec;
+  let hwAccel = [];
+  let hwFilter;
   if (firstVideoStream.codec_name === 'vp8') inputCodec = 'libvpx';
   else if (firstVideoStream.codec_name === 'vp9') inputCodec = 'libvpx-vp9';
+  else if (firstVideoStream.codec_name === 'hevc') {
+    // TODO: scaleFilter
+    hwAccel = ['-hwaccel', 'cuvid', '-resize', '1920x1080'];
+    inputCodec = 'hevc_cuvid'
+    hwFilter = ['-vf', 'hwdownload,format=nv12' + (ptsFilter ? `,${ptsFilter}` : '')];
+  }
 
   // http://zulko.github.io/blog/2013/09/27/read-and-write-video-frames-in-python-using-ffmpeg/
   // Testing: ffmpeg -i 'vid.mov' -t 1 -vcodec rawvideo -pix_fmt rgba -f image2pipe - | ffmpeg -f rawvideo -vcodec rawvideo -pix_fmt rgba -s 2166x1650 -i - -vf format=yuv420p -vcodec libx264 -y out.mp4
   // https://trac.ffmpeg.org/wiki/ChangingFrameRate
   const args = [
     ...getFfmpegCommonArgs({ enableFfmpegLog }),
+    ...(hwAccel),
     ...(inputCodec ? ['-vcodec', inputCodec] : []),
     ...(cutFrom ? ['-ss', cutFrom] : []),
     '-i', path,
     ...(cutTo ? ['-t', (cutTo - cutFrom) * speedFactor] : []),
-    '-vf', `${ptsFilter}fps=${framerateStr},${scaleFilter}`,
-    '-map', 'v:0',
-    '-vcodec', 'rawvideo',
+    ...(hwFilter ? (hwFilter) : (['-vf', `${ptsFilter ? ptsFilter + ',' : ''}fps=${framerateStr},${scaleFilter}`])),
+    // '-map', 'v:0',
+    // '-vcodec', 'rawvideo',
     '-pix_fmt', 'rgba',
-    '-f', 'image2pipe',
+    '-f', 'rawvideo',
     '-',
   ];
   if (verbose) console.log(args.join(' '));
