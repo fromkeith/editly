@@ -21,7 +21,7 @@ const fabricFrameSources = {
   'slide-in-text': slideInTextFrameSource,
 };
 
-async function createFrameSource({ clip, clipIndex, width, height, channels, verbose, logTimes, ffmpegPath, ffprobePath, enableFfmpegLog, framerateStr }) {
+async function createFrameSource({ clip, clipIndex, width, height, channels, verbose, logTimes, ffmpegPath, ffprobePath, enableFfmpegLog, framerateStr, useHwAcceleration }) {
   const { layers, duration } = clip;
 
   const visualLayers = layers.filter((layer) => layer.type !== 'audio');
@@ -43,7 +43,7 @@ async function createFrameSource({ clip, clipIndex, width, height, channels, ver
 
     assert(createFrameSourceFunc, `Invalid type ${type}`);
 
-    const frameSource = await createFrameSourceFunc({ ffmpegPath, ffprobePath, width, height, duration, channels, verbose, logTimes, enableFfmpegLog, framerateStr, params });
+    const frameSource = await createFrameSourceFunc({ ffmpegPath, ffprobePath, width, height, duration, channels, verbose, logTimes, enableFfmpegLog, framerateStr, params, useHwAcceleration });
     return { layer, frameSource };
   }, { concurrency: 1 });
 

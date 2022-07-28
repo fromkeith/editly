@@ -41,6 +41,7 @@ const Editly = async (config = {}) => {
     audioNorm,
     outputVolume,
     customOutputArgs,
+    useHwAcceleration,
 
     ffmpegPath = 'ffmpeg',
     ffprobePath = 'ffprobe',
@@ -185,18 +186,34 @@ const Editly = async (config = {}) => {
     }
 
     // https://superuser.com/questions/556029/how-do-i-convert-a-video-to-gif-using-ffmpeg-with-reasonable-quality
-    const videoOutputArgs = isGif ? [
-      '-vf', `format=rgb24,fps=${fps},scale=${width}:${height}:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse`,
-      '-loop', 0,
-    ] : [
-      '-vf', 'format=yuv420p',
-      '-vcodec', 'libx264',
-      '-profile:v', 'high',
-      ...(fast ? ['-preset:v', 'ultrafast'] : ['-preset:v', 'medium']),
-      '-crf', '18',
+    let videoOutputArgs;
 
-      '-movflags', 'faststart',
-    ];
+    if (isGif) {
+      videoOutputArgs = [
+          '-vf', `format=rgb24,fps=${fps},scale=${width}:${height}:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse`,
+          '-loop', 0,
+        ];
+    } else if (useHwAcceleration) {
+      videoOutputArgs = [
+        '-vf', 'format=yuv420p',
+        '-vcodec', 'h264_nvenc',
+        '-profile:v', 'high',
+        ...(fast ? ['-preset:v', 'ultrafast'] : ['-preset:v', 'medium']),
+        '-crf', '18',
+
+        '-movflags', 'faststart',
+      ];
+    } else {
+      videoOutputArgs = [
+        '-vf', 'format=yuv420p',
+        '-vcodec', 'libx264',
+        '-profile:v', 'high',
+        ...(fast ? ['-preset:v', 'ultrafast'] : ['-preset:v', 'medium']),
+        '-crf', '18',
+
+        '-movflags', 'faststart',
+      ];
+    }
 
     const audioOutputArgs = audioFilePath ? ['-acodec', 'aac', '-b:a', '128k'] : [];
 
@@ -206,19 +223,16 @@ const Editly = async (config = {}) => {
   function startFfmpegWriterProcess() {
     const args = [
       ...(enableFfmpegLog ? [] : ['-hide_banner', '-loglevel', 'error']),
-
       '-f', 'rawvideo',
       '-vcodec', 'rawvideo',
       '-pix_fmt', 'rgba',
       '-s', `${width}x${height}`,
       '-r', framerateStr,
       '-i', '-',
-
       ...(audioFilePath ? ['-i', audioFilePath] : []),
 
       ...(!isGif ? ['-map', '0:v:0'] : []),
-      ...(audioFilePath ? ['-map', '1:a:0'] : []),
-
+      // ...(audioFilePath ? ['-map', '1:a:0'] : []),
       ...getOutputArgs(),
 
       '-y', outPath,
@@ -245,7 +259,7 @@ const Editly = async (config = {}) => {
   const getTransitionFromClip = () => clips[transitionFromClipId];
   const getTransitionToClip = () => clips[getTransitionToClipId()];
 
-  const getSource = async (clip, clipIndex) => createFrameSource({ clip, clipIndex, width, height, channels, verbose, logTimes, ffmpegPath, ffprobePath, enableFfmpegLog, framerateStr });
+  const getSource = async (clip, clipIndex) => createFrameSource({ clip, clipIndex, width, height, channels, verbose, logTimes, ffmpegPath, ffprobePath, enableFfmpegLog, framerateStr, useHwAcceleration });
   const getTransitionFromSource = async () => getSource(getTransitionFromClip(), transitionFromClipId);
   const getTransitionToSource = async () => (getTransitionToClip() && getSource(getTransitionToClip(), getTransitionToClipId()));
 

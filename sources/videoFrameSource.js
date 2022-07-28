@@ -5,7 +5,7 @@ const { getFfmpegCommonArgs } = require('../ffmpeg');
 const { readFileStreams } = require('../util');
 const { rgbaToFabricImage, blurImage } = require('./fabric');
 
-module.exports = async ({ width: canvasWidth, height: canvasHeight, channels, framerateStr, verbose, logTimes, ffmpegPath, ffprobePath, enableFfmpegLog, params }) => {
+module.exports = async ({ width: canvasWidth, height: canvasHeight, channels, framerateStr, verbose, logTimes, ffmpegPath, ffprobePath, enableFfmpegLog, params, useHwAcceleration }) => {
   const { path, cutFrom, cutTo, resizeMode = 'contain-blur', speedFactor, inputWidth, inputHeight, width: requestedWidthRel, height: requestedHeightRel, left: leftRel = 0, top: topRel = 0, originX = 'left', originY = 'top' } = params;
 
   const requestedWidth = requestedWidthRel ? Math.round(requestedWidthRel * canvasWidth) : canvasWidth;
@@ -62,7 +62,6 @@ module.exports = async ({ width: canvasWidth, height: canvasHeight, channels, fr
 
   // TODO assert that we have read the correct amount of frames
 
-  
   // let inFrameCount = 0;
 
   // https://forum.unity.com/threads/settings-for-importing-a-video-with-an-alpha-channel.457657/
@@ -75,11 +74,16 @@ module.exports = async ({ width: canvasWidth, height: canvasHeight, channels, fr
   let hwFilter;
   if (firstVideoStream.codec_name === 'vp8') inputCodec = 'libvpx';
   else if (firstVideoStream.codec_name === 'vp9') inputCodec = 'libvpx-vp9';
-  else if (firstVideoStream.codec_name === 'hevc') {
-    // TODO: scaleFilter
-    hwAccel = ['-hwaccel', 'cuvid', '-resize', '1920x1080'];
-    inputCodec = 'hevc_cuvid'
-    hwFilter = ['-vf', 'hwdownload,format=nv12' + (ptsFilter ? `,${ptsFilter}` : '')];
+  else if (useHwAcceleration) {
+    if (firstVideoStream.codec_name === 'hevc') {
+      hwAccel = ['-hwaccel', 'cuvid', '-resize', `${targetWidth}x${targetHeight}`];
+      inputCodec = 'hevc_cuvid'
+      hwFilter = ['-vf', 'hwdownload,format=nv12' + (ptsFilter ? `,${ptsFilter}` : '')];
+    } else if (firstVideoStream.codec_name === 'h264') {
+      hwAccel = ['-hwaccel', 'cuvid', '-resize', `${targetWidth}x${targetHeight}`];
+      inputCodec = 'h264_cuvid'
+      hwFilter = ['-vf', 'hwdownload,format=nv12' + (ptsFilter ? `,${ptsFilter}` : '')];
+    }
   }
 
   console.log({
