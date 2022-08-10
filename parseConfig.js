@@ -142,7 +142,7 @@ async function parseConfig({ defaults: defaultsIn = {}, clips, arbitraryAudio: a
         if (!cutTo) cutTo = fileDuration;
         cutTo = Math.max(cutTo, cutFrom);
         cutTo = Math.min(cutTo, fileDuration);
-        assert(cutFrom < cutTo, 'cutFrom must be lower than cutTo');
+        assert(cutFrom < cutTo, `cutFrom (${cutFrom}) must be lower than cutTo (${cutTo})`);
 
         const inputDuration = cutTo - cutFrom;
 
