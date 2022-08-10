@@ -199,7 +199,7 @@ const Editly = async (config = {}) => {
         '-vcodec', 'h264_nvenc',
         '-profile:v', 'high',
         ...(fast ? ['-preset:v', 'ultrafast'] : ['-preset:v', 'medium']),
-        '-crf', '18',
+        '-b:v', '5M', '-maxrate:v', '6M', '-bufsize:v', '10M',
 
         '-movflags', 'faststart',
       ];
@@ -232,7 +232,7 @@ const Editly = async (config = {}) => {
       ...(audioFilePath ? ['-i', audioFilePath] : []),
 
       ...(!isGif ? ['-map', '0:v:0'] : []),
-      // ...(audioFilePath ? ['-map', '1:a:0'] : []),
+      ...(audioFilePath ? ['-map', '1:a:0'] : []),
       ...getOutputArgs(),
 
       '-y', outPath,
