@@ -12,6 +12,11 @@ Inspired by [ffmpeg-concat](https://github.com/transitive-bullshit/ffmpeg-concat
 
 This GIF / YouTube was created with this command: "editly [commonFeatures.json5](examples/commonFeatures.json5)". See [more examples here](https://github.com/mifi/editly/tree/master/examples#examples).
 
+## This Fork
+
+* Adds HW acceleration using `CUVID`.
+* Speeds up encoding avoiding the `canvas` / `fabric` if we can
+
 ## Features
 
 - Edit videos with code! 🤓
